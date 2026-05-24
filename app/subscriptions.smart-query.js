@@ -57,18 +57,21 @@ window.SubscriptionsSmartQuery = (function () {
     '1) keywords: output 5-12 objects; each item must include keyword and query, keyword_cn optional.',
     '2) keyword and query MUST be English retrieval text only. Do not put Chinese in keyword or query.',
     '3) keyword_cn and query_cn MUST be Chinese translations/explanations when present.',
-    '4) keywords are used for recall and should be atomic phrases (prefer 1-3 core words).',
-    '5) Keep keywords atomic and avoid packing multiple concepts into one phrase.',
-    '6) Do not include concrete example topics in the prompt.',
-    '7) intent_queries: output 1-4 actionable intent queries. The query field MUST be English only; query_cn should be Chinese.',
-    '8) Do not output extra fields like must_have / optional / exclude / rewrite_for_embedding.',
-    '9) Return pure JSON only, no explanations.',
-    '10) intent_queries should be concise, timeless, and must not include years or year-like tokens.',
-    '11) Tag suggestion must be concise: at most 12 characters total, counting hyphens.',
-    '12) Tag suggestion must NOT include any year. Do not append or embed years (including digits like 2026/2025/2024 etc.) in tag.',
-    '13) Tag suggestion must be English words or an English acronym only. Never output Chinese in tag.',
-    '14) Tag suggestion must use hyphen-separated words when multiple words are needed, for example "reinforcement-learning". Do not use spaces or underscores in tag.',
-    '15) If the descriptive tag would exceed 12 characters, output an English acronym or a shorter hyphenated label.',
+    '4) keywords are used for BM25 recall and should be meaningful atomic noun phrases, normally 2-4 English words.',
+    '5) Do NOT output acronym-only or abbreviation-only keywords such as "rl", "xrl", "sr", "llm". Expand them to full phrases like "reinforcement learning" or "large language model".',
+    '6) Do NOT output incomplete modifier phrases ending with generic words like "driven", "based", "related", "guided", "enhanced", "for", or "with".',
+    '7) Keep keywords atomic and avoid packing multiple concepts into one phrase.',
+    '8) Do not include concrete example topics in the prompt.',
+    '9) intent_queries: output 1-4 actionable intent queries. The query field MUST be English only; query_cn should be Chinese.',
+    '10) intent_queries must be specific semantic search sentences, not acronym-only strings.',
+    '11) Do not output extra fields like must_have / optional / exclude / rewrite_for_embedding.',
+    '12) Return pure JSON only, no explanations.',
+    '13) intent_queries should be concise, timeless, and must not include years or year-like tokens.',
+    '14) Tag suggestion must be concise: at most 12 characters total, counting hyphens.',
+    '15) Tag suggestion must NOT include any year. Do not append or embed years (including digits like 2026/2025/2024 etc.) in tag.',
+    '16) Tag suggestion must be English words or an English acronym only. Never output Chinese in tag.',
+    '17) Tag suggestion must use hyphen-separated words when multiple words are needed, for example "reinforcement-learning". Do not use spaces or underscores in tag.',
+    '18) If the descriptive tag would exceed 12 characters, output an English acronym or a shorter hyphenated label.',
   ].join('\n');
 
   const normalizeText = (v) => String(v || '').trim();
@@ -780,13 +783,27 @@ window.SubscriptionsSmartQuery = (function () {
         .replace(/^(for|of|in|on|with|using|based on)\s+/i, '')
         .replace(/\s+/g, ' ')
         .trim();
+    const trimWeakKeywordSuffix = (s) =>
+      normalizeText(s)
+        .replace(/\b(driven|based|related|guided|enhanced|oriented|focused|for|with)$/i, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    const isWeakAcronymKeyword = (s) => /^[A-Za-z]{1,3}$/.test(normalizeText(s));
+    const isLowQualityKeyword = (s) => {
+      const text = normalizeText(s);
+      if (!text) return true;
+      if (isWeakAcronymKeyword(text)) return true;
+      return /\b(driven|based|related|guided|enhanced|oriented|focused|for|with)$/i.test(text);
+    };
 
     let keywords = rawKeywords
       .map((item, idx) => {
         if (!item) return null;
-        const rawKeyword =
-          typeof item === 'string' ? normalizeText(item) : normalizeText(item.keyword || item.text || item.expr || '');
+        const rawKeyword = trimWeakKeywordSuffix(
+          typeof item === 'string' ? normalizeText(item) : normalizeText(item.keyword || item.text || item.expr || ''),
+        );
         if (!isEnglishRetrievalText(rawKeyword)) return null;
+        if (isLowQualityKeyword(rawKeyword)) return null;
         const keywordCn = normalizeText(
           typeof item === 'string'
             ? ''
@@ -800,7 +817,7 @@ window.SubscriptionsSmartQuery = (function () {
             ? ''
             : normalizeText(item.query_cn || item.query_zh || item.note || ''),
         );
-        const query = isEnglishRetrievalText(rawQuery) ? rawQuery : rawKeyword;
+        const query = isEnglishRetrievalText(rawQuery) && !isWeakAcronymKeyword(rawQuery) ? rawQuery : rawKeyword;
         return {
           keyword: rawKeyword,
           keyword_cn: keywordCn,
@@ -866,7 +883,7 @@ window.SubscriptionsSmartQuery = (function () {
 
     const rawIntentQueries = normalizeIntentSource(data);
     const intentQueries = normalizeIntentQueryEntries(rawIntentQueries).filter((item) =>
-      isEnglishRetrievalText(item && item.query),
+      isEnglishRetrievalText(item && item.query) && !isWeakAcronymKeyword(item && item.query),
     );
 
     return {

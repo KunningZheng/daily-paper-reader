@@ -24,6 +24,8 @@ function testPromptRequiresEnglishRetrievalFieldsAndChineseCnFields() {
   assert.match(prompt, /keyword and query MUST be English retrieval text only/);
   assert.match(prompt, /keyword_cn and query_cn MUST be Chinese/);
   assert.match(prompt, /The query field MUST be English only/);
+  assert.match(prompt, /Do NOT output acronym-only/);
+  assert.match(prompt, /meaningful atomic noun phrases/);
   assert.match(prompt, /hyphen-separated words/);
   assert.match(prompt, /English words or an English acronym only/);
   assert.match(prompt, /at most 12 characters/);
@@ -100,8 +102,35 @@ function testGeneratedCandidatesKeepChineseOutOfRetrievalFields() {
   });
 }
 
+function testGeneratedCandidatesDropWeakAcronymKeywords() {
+  const normalized = normalizeGenerated({
+    tag: 'RL',
+    description: '强化学习方程发现',
+    keywords: [
+      { keyword: 'rl', query: 'reinforcement learning equation discovery', keyword_cn: '强化学习方程发现' },
+      { keyword: 'xrl', query: 'explainable reinforcement learning symbolic regression', keyword_cn: '可解释强化学习符号回归' },
+      { keyword: 'reinforcement learning driven', query: 'reinforcement learning driven equation discovery', keyword_cn: '强化学习驱动' },
+      { keyword: 'reinforcement learning', query: 'reinforcement learning equation discovery', keyword_cn: '强化学习' },
+    ],
+    intent_queries: [
+      { query: 'rl', query_cn: '强化学习' },
+      { query: 'explainable reinforcement learning for symbolic regression', query_cn: '可解释强化学习符号回归' },
+    ],
+  });
+
+  assert.deepEqual(
+    normalized.keywords.map((item) => item.keyword),
+    ['reinforcement learning'],
+  );
+  assert.deepEqual(
+    normalized.intent_queries.map((item) => item.query),
+    ['explainable reinforcement learning for symbolic regression'],
+  );
+}
+
 testPromptRequiresEnglishRetrievalFieldsAndChineseCnFields();
 testSuggestedTagIsEnglishAndAtMostTwelveChars();
 testGeneratedCandidatesKeepChineseOutOfRetrievalFields();
+testGeneratedCandidatesDropWeakAcronymKeywords();
 
 console.log('subscriptions smart query tests passed');
